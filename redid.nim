@@ -44,6 +44,8 @@ type
     selection: Selection
     viewport: Viewport
     font: Font
+    fontBold: Font
+    fontItalic: Font
     metrics: FontMetrics
     fontSize: float32
     modified: bool
@@ -270,7 +272,7 @@ proc handleInput(editor: var Editor) =
   if isKeyPressed(Left):
     editor.moveCursorLeft()
   
-  if isKeyPressed(Right):
+  if isKeyDown(Right):
     editor.moveCursorRight()
   
   if isKeyPressed(Up):
@@ -291,8 +293,10 @@ proc main() =
     modified: false
   )
   
-  # Load default font (using built-in for now)
-  editor.font = getFontDefault()
+  # Load scientifica fonts
+  editor.font = loadFont("fonts/scientifica.ttf")
+  editor.fontBold = loadFont("fonts/scientificaBold.ttf")
+  editor.fontItalic = loadFont("fonts/scientificaItalic.ttf")
   
   # Calculate metrics
   let sampleSize = measureText(editor.font, "M", editor.fontSize, 0)
