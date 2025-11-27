@@ -2,6 +2,12 @@ import raylib
 import unicode
 import strutils
 
+# TODO
+# - use KeyDown event and implement delay after initial keypress similar to typical OS behavior
+# - remove window chrome but still enable resize, draw dark gray background for title bar and add padding to simulate title bar and chrome
+# - enable mouse (mouse click should move cursor to mouse position)
+# - implement font smoothing
+
 # Types
 type
   GapBuffer = object
@@ -272,7 +278,7 @@ proc handleInput(editor: var Editor) =
   if isKeyPressed(Left):
     editor.moveCursorLeft()
   
-  if isKeyDown(Right):
+  if isKeyPressed(Right):
     editor.moveCursorRight()
   
   if isKeyPressed(Up):
@@ -294,9 +300,9 @@ proc main() =
   )
   
   # Load scientifica fonts
-  editor.font = loadFont("fonts/scientifica.ttf")
-  editor.fontBold = loadFont("fonts/scientificaBold.ttf")
-  editor.fontItalic = loadFont("fonts/scientificaItalic.ttf")
+  editor.font = loadFont("fonts/AnomalyMono-Regular.otf")
+  editor.fontBold = loadFont("fonts/AnomalyMono-Regular.otf")
+  editor.fontItalic = loadFont("fonts/MonaspaceRadon-Italic.otf")
   
   # Calculate metrics
   let sampleSize = measureText(editor.font, "M", editor.fontSize, 0)
