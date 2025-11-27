@@ -2,13 +2,13 @@ import raylib
 import unicode
 import strutils
 
-# TODO
-# - use KeyDown event and implement delay after initial keypress similar to typical OS behavior
-# - remove window chrome but still enable resize, draw dark gray background for title bar and add padding to simulate title bar and chrome
-# - enable mouse (mouse click should move cursor to mouse position)
-# - implement font smoothing
-
 # Types
+type
+  KeyRepeatState = object
+    key: KeyboardKey
+    pressTime: float64
+    lastRepeatTime: float64
+    repeating: bool
 type
   GapBuffer = object
     data: seq[Rune]
@@ -55,6 +55,9 @@ type
     metrics: FontMetrics
     fontSize: float32
     modified: bool
+    keyRepeat: KeyRepeatState
+    titleBarHeight: float32
+    contentOffsetY: float32
 
 # Gap Buffer Operations
 proc newGapBuffer(initialSize: int = 256): GapBuffer =
@@ -217,6 +220,22 @@ proc moveCursorDown(editor: var Editor) =
     editor.cursor.column = min(editor.cursor.desiredColumn, 
                                editor.buffer.lines[editor.cursor.line].length)
 
+proc moveCursorToMouse(editor: var Editor, mouseX, mouseY: float32) =
+  # Adjust for scroll and padding
+  let contentX = mouseX + editor.viewport.scrollX - 10.0f
+  let contentY = mouseY + editor.viewport.scrollY - editor.contentOffsetY
+  
+  # Calculate line
+  let clickedLine = (contentY / editor.metrics.lineHeight).int
+  if clickedLine >= 0 and clickedLine < editor.buffer.lines.len:
+    editor.cursor.line = clickedLine
+    
+    # Calculate column
+    let clickedColumn = (contentX / editor.metrics.glyphWidth).int
+    let lineLen = editor.buffer.lines[editor.cursor.line].length
+    editor.cursor.column = clamp(clickedColumn, 0, lineLen)
+    editor.cursor.desiredColumn = editor.cursor.column
+
 # Rendering
 proc renderLine(line: string, x, y: float32, font: Font, fontSize: float32, 
                 glyphWidth: float32, color: Color) =
@@ -229,12 +248,17 @@ proc render(editor: var Editor) =
   beginDrawing()
   clearBackground(RayWhite)
   
+  # Draw custom title bar
+  drawRectangle(0, 0, getScreenWidth(), editor.titleBarHeight.int32, Color(r: 60, g: 60, b: 60, a: 255))
+  drawText("Nim Text Editor", 10, ((editor.titleBarHeight - 20) / 2).int32, 20, RayWhite)
+  
   # Calculate visible lines
   let windowHeight = getScreenHeight()
-  editor.viewport.visibleLines = (windowHeight.float32 / editor.metrics.lineHeight).int + 1
+  let availableHeight = windowHeight.float32 - editor.titleBarHeight - 40  # -40 for status bar
+  editor.viewport.visibleLines = (availableHeight / editor.metrics.lineHeight).int + 1
   
   # Render visible lines
-  var y = 10.0f - editor.viewport.scrollY
+  var y = editor.contentOffsetY - editor.viewport.scrollY
   for i in editor.viewport.firstVisibleLine..<
            min(editor.viewport.firstVisibleLine + editor.viewport.visibleLines,
                editor.buffer.lines.len):
@@ -260,6 +284,35 @@ proc render(editor: var Editor) =
   endDrawing()
 
 # Input handling
+proc handleKeyRepeat(editor: var Editor, key: KeyboardKey, action: proc(e: var Editor)) =
+  const InitialDelay = 0.5  # 500ms initial delay
+  const RepeatRate = 0.03   # 30ms repeat rate (33 repeats per second)
+  
+  let currentTime = raylib.getTime()
+  
+  if isKeyPressed(key):
+    action(editor)
+    editor.keyRepeat.key = key
+    editor.keyRepeat.pressTime = currentTime
+    editor.keyRepeat.lastRepeatTime = currentTime
+    editor.keyRepeat.repeating = false
+  elif isKeyDown(key):
+    if editor.keyRepeat.key == key:
+      let elapsed = currentTime - editor.keyRepeat.pressTime
+      if not editor.keyRepeat.repeating and elapsed >= InitialDelay:
+        editor.keyRepeat.repeating = true
+        editor.keyRepeat.lastRepeatTime = currentTime
+      
+      if editor.keyRepeat.repeating:
+        let timeSinceLastRepeat = currentTime - editor.keyRepeat.lastRepeatTime
+        if timeSinceLastRepeat >= RepeatRate:
+          action(editor)
+          editor.keyRepeat.lastRepeatTime = currentTime
+  elif isKeyReleased(key):
+    if editor.keyRepeat.key == key:
+      editor.keyRepeat.key = Null
+      editor.keyRepeat.repeating = false
+
 proc handleInput(editor: var Editor) =
   # Character input
   var key = getCharPressed()
@@ -268,27 +321,26 @@ proc handleInput(editor: var Editor) =
       editor.insertChar(Rune(key))
     key = getCharPressed()
   
-  # Special keys
-  if isKeyPressed(Backspace):
-    editor.deleteChar()
+  # Special keys with repeat
+  handleKeyRepeat(editor, Backspace, proc(e: var Editor) = e.deleteChar())
+  handleKeyRepeat(editor, Left, proc(e: var Editor) = e.moveCursorLeft())
+  handleKeyRepeat(editor, Right, proc(e: var Editor) = e.moveCursorRight())
+  handleKeyRepeat(editor, Up, proc(e: var Editor) = e.moveCursorUp())
+  handleKeyRepeat(editor, Down, proc(e: var Editor) = e.moveCursorDown())
   
+  # Enter key (no repeat)
   if isKeyPressed(Enter):
     editor.insertNewline()
   
-  if isKeyPressed(Left):
-    editor.moveCursorLeft()
-  
-  if isKeyPressed(Right):
-    editor.moveCursorRight()
-  
-  if isKeyPressed(Up):
-    editor.moveCursorUp()
-  
-  if isKeyPressed(Down):
-    editor.moveCursorDown()
+  # Mouse input
+  if isMouseButtonPressed(Left):
+    let mousePos = getMousePosition()
+    editor.moveCursorToMouse(mousePos.x, mousePos.y)
 
 # Main
 proc main() =
+  # Create borderless window that can still be resized
+  setConfigFlags(flags(WindowUndecorated, WindowResizable, Msaa4xHint))
   initWindow(1280, 720, "Nim Text Editor")
   setTargetFPS(60)
   
@@ -296,13 +348,20 @@ proc main() =
     buffer: newTextBuffer("# Welcome to Nim Editor\n# Start typing...\n"),
     cursor: Cursor(line: 0, column: 0, desiredColumn: 0),
     fontSize: 16.0,
-    modified: false
+    modified: false,
+    titleBarHeight: 40.0,
+    contentOffsetY: 50.0  # titleBarHeight + 10px padding
   )
   
   # Load scientifica fonts
   editor.font = loadFont("fonts/AnomalyMono-Regular.otf")
   editor.fontBold = loadFont("fonts/AnomalyMono-Regular.otf")
   editor.fontItalic = loadFont("fonts/MonaspaceRadon-Italic.otf")
+  
+  # Enable font smoothing
+  setTextureFilter(editor.font.texture, Bilinear)
+  setTextureFilter(editor.fontBold.texture, Bilinear)
+  setTextureFilter(editor.fontItalic.texture, Bilinear)
   
   # Calculate metrics
   let sampleSize = measureText(editor.font, "M", editor.fontSize, 0)
@@ -317,6 +376,13 @@ proc main() =
     scrollY: 0,
     visibleLines: 0,
     firstVisibleLine: 0
+  )
+  
+  editor.keyRepeat = KeyRepeatState(
+    key: Null,
+    pressTime: 0.0,
+    lastRepeatTime: 0.0,
+    repeating: false
   )
   
   while not windowShouldClose():
